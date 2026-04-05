@@ -27,18 +27,21 @@ O foco principal é resolver o desafio da **consistência em sistemas distribuí
 
 ## 🗺️ Roadmap de Desenvolvimento: Billing Engine
 
-### ✅ 1. Infraestrutura como Código (Terraform) - **CONCLUÍDO**
+### ✅ 1. Infraestrutura como Código (Terraform)
 * [x] **Bootstrap:** S3 para Remote State + Usuário IAM com chaves.
 * [x] **Mensageria:** Módulo SQS (Standard + DLQ) configurado em *us-east-2*.
 * [x] **Database & Cache:** RDS Postgres (v15) + ElastiCache Redis (v7).
 * [x] **EKS:** Cluster Kubernetes v1.29 com Managed Node Groups (SPOT + AL2).
 
-### 🚀 2. API Gateway & Mensageria (NestJS) - **PRÓXIMA PARADA**
-* [ ] **Project Setup:** Scaffold do NestJS com ConfigService e validação de `.env`.
-* [ ] **Stripe Module:** Integração com SDK do Stripe para criar `PaymentIntent`.
-* [ ] **Observabilidade:** Middleware para gerar e injetar **Correlation ID (X-Correlation-ID)**.
-* [ ] **SQS Producer:** Serviço para enviar a intenção de cobrança para a fila de processamento.
-* [ ] **Webhook Security:** Handler para eventos do Stripe com validação de assinatura (HMAC).
+### 🚀 2. API Gateway & Mensageria (NestJS)
+* [x] **Project Setup:** Scaffold do NestJS com ConfigService e validação rigorosa de `.env`.
+* [x] **Stripe Module:** Integração completa com SDK do Stripe para criação de `PaymentIntent`.
+* [x] **SQS Producer:** Implementação do serviço de despacho de mensagens para a fila de faturamento em Ohio.
+* [ ] **Observabilidade:** Middleware para gerar e injetar **Correlation ID (X-Correlation-ID)** globalmente.
+* [ ] **Webhook Security:** Handler para eventos do Stripe com validação de assinatura (HMAC) para confirmação de pagamento.
+* [ ] **Automated Testing Suite:** * [ ] **Unit Tests:** Cobertura dos serviços de Billing e Stripe com Mocks.
+    * [ ] **Integration Tests:** Testes de fluxo ponta-a-ponta (Controller -> Service -> DB/SQS).
+    * [ ] **E2E Tests:** Validação da API simulando chamadas reais via Supertest.
 
 ### 🛡️ 3. Worker Consumer (Resiliência & Idempotência)
 * [ ] **SQS Consumer:** Implementação do listener assíncrono para processar a fila.
@@ -46,7 +49,13 @@ O foco principal é resolver o desafio da **consistência em sistemas distribuí
 * [ ] **Database Layer:** Persistência dos estados da transação (Pending, Succeeded, Failed).
 * [ ] **Retry Policy:** Configuração de visibilidade da fila e redrive para DLQ em caso de erro crítico.
 
-### ⚙️ 4. Automação & CI/CD (The Grand Finale)
+### ☸️ 4. Orquestração Kubernetes (Manifestos & Helm)
+* [ ] **K8s Objects:** Escrita dos arquivos `deployment.yaml`, `service.yaml` e `hpa.yaml` para a API.
+* [ ] **Worker Scaling:** Configuração de Deployment específico para o Worker (sem Service, focado em consumo).
+* [ ] **ConfigMaps & Secrets:** Externalização de variáveis de ambiente e integração com Secrets do K8s.
+* [ ] **Liveness & Readiness:** Implementação de probes no NestJS para garantir que o tráfego só chegue quando o app estiver pronto.
+
+### ⚙️ 5. Automação & CI/CD (The Grand Finale)
 * [ ] **Dockerization:** Dockerfile multi-stage otimizado para produção.
 * [ ] **CI Pipeline:** GitHub Actions para rodar testes e build da imagem.
 * [ ] **CD Pipeline:** Deploy automatizado no EKS (Helm ou K8s Manifests).
@@ -89,7 +98,7 @@ Antes de rodar qualquer script, você precisa conectar seu terminal à sua conta
 4. Preencha conforme solicitado:
    * **AWS Access Key ID:** `Sua Chave Aqui`
    * **AWS Secret Access Key:** `Sua Secret Aqui`
-   * **Default region name:** `us-east-1`
+   * **Default region name:** `us-east-2`
    * **Default output format:** `json`
 
 5. Teste a conexão:
@@ -139,5 +148,76 @@ terraform apply -auto-approve
 Após o sucesso do Terraform, conecte seu `kubectl` ao cluster criado:
 
 ```bash
-aws eks update-kubeconfig --region us-east-1 --name billing-engine-cluster
+aws eks update-kubeconfig --region us-east-2 --name billing-engine-cluster
 ```
+
+### 5. Configuração do Ambiente de Desenvolvimento (API Gateway)
+
+Após subir a infraestrutura com Terraform, precisamos conectar a API NestJS aos recursos reais criados na AWS. Utilizamos um script de automação que extrai os `outputs` do Terraform e as credenciais do seu `aws-cli` para gerar o arquivo `.env` automaticamente.
+
+#### Gerando o arquivo .env
+Na raiz do projeto, execute o script de setup:
+
+```bash
+# Dar permissão de execução
+chmod +x setup-env.sh
+
+# Rodar o script para mapear RDS, SQS e Credenciais AWS
+./setup-env.sh
+```
+
+#### 🔑 Configuração Manual de Segredos (Obrigatório)
+Por questões de segurança e integração externa, dois valores **precisam** ser inseridos manualmente no arquivo `./api-gateway/.env`:
+
+1.  **DB_PASSWORD:** Insira a senha que você definiu na etapa de infraestrutura (a mesma usada na variável `TF_VAR_db_password`).
+2.  **STRIPE_SECRET_KEY:** Insira sua chave privada de teste obtida no [Dashboard do Stripe](https://dashboard.stripe.com/test/apikeys).
+
+```env
+# Exemplo de preenchimento manual no .env
+DB_PASSWORD=SuaSenhaSegura123
+STRIPE_SECRET_KEY=sk_test_51TIi...
+```
+
+### 🚀 6. Rodando a API Localmente
+
+Com o `.env` configurado e o RDS (Ohio) pronto para conexões, inicie o servidor:
+
+```bash
+cd api-gateway
+
+# Instalar dependências
+npm install
+
+# Iniciar o servidor de desenvolvimento
+npm run start:dev
+```
+
+#### 🧪 Testando o Fluxo de Faturamento (End-to-End)
+Para validar se a API está integrando corretamente com Stripe, Postgres e SQS, execute o seguinte comando no terminal:
+
+```bash
+curl -X POST http://localhost:3000/billing/checkout \
+     -H "Content-Type: application/json" \
+     -d '{"amount": 100}'
+```
+
+**Critérios de Sucesso:**
+1.  **Response:** Recebimento de um JSON contendo `status: "transaction_initiated"` e o `transactionId`.
+2.  **Persistência:** A transação deve aparecer na tabela `transactions` do seu banco de dados.
+3.  **Mensageria:** Uma mensagem deve estar disponível na fila `billing-engine-invoice-queue` no Console AWS (SQS).
+
+---
+
+## 🛠️ Comandos Úteis
+
+### Banco de Dados (Postgres)
+Como o RDS está em uma Subnet Pública para este laboratório, você pode conectar via DBeaver ou TablePlus usando o endpoint presente no `DB_HOST` do seu `.env`.
+
+### Verificando Fila SQS via CLI
+
+antes de executar o comando esteja na raiz do projeto.
+
+```bash
+aws sqs receive-message --queue-url $(grep AWS_SQS_QUEUE_URL api-gateway/.env | cut -d'=' -f2)
+```
+
