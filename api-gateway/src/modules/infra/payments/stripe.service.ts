@@ -19,6 +19,11 @@ export class StripeService {
     });
   }
 
+  constructEvent(payload: Buffer, signature: string): any {
+    const webhookSecret = this.config.get<string>('STRIPE_WEBHOOK_SECRET');
+    return this.stripe.webhooks.constructEvent(payload, signature, webhookSecret!);
+  }
+
   async createPaymentIntent(amount: number, correlationId: string): Promise<any> {
     try {
       

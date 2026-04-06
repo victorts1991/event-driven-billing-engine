@@ -26,7 +26,7 @@ get_tf_val() {
   echo "$TF_OUTPUTS" | jq -r ".$1.value // empty"
 }
 
-GERA O .ENV COM AS CHAVES AWS
+# GERA O .ENV COM AS CHAVES AWS
 cat <<EOF > $ENV_PATH
 # --- Gerado Automaticamente via Terraform ---
 PORT=3000
@@ -41,6 +41,7 @@ DB_PASSWORD=SuaSenhaSegura123
 
 # --- Stripe ---
 STRIPE_SECRET_KEY=sk_test_insira_sua_chave_aqui
+STRIPE_WEBHOOK_SECRET=whsec_insira_sua_chave_aqui
 
 # --- AWS / Messaging ---
 AWS_REGION=us-east-2

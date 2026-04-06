@@ -37,11 +37,9 @@ O foco principal é resolver o desafio da **consistência em sistemas distribuí
 * [x] **Project Setup:** Scaffold do NestJS com ConfigService e validação rigorosa de `.env`.
 * [x] **Stripe Module:** Integração completa com SDK do Stripe para criação de `PaymentIntent`.
 * [x] **SQS Producer:** Implementação do serviço de despacho de mensagens para a fila de faturamento em Ohio.
-* [ ] **Observabilidade:** Middleware para gerar e injetar **Correlation ID (X-Correlation-ID)** globalmente.
-* [ ] **Webhook Security:** Handler para eventos do Stripe com validação de assinatura (HMAC) para confirmação de pagamento.
-* [ ] **Automated Testing Suite:** * [ ] **Unit Tests:** Cobertura dos serviços de Billing e Stripe com Mocks.
-    * [ ] **Integration Tests:** Testes de fluxo ponta-a-ponta (Controller -> Service -> DB/SQS).
-    * [ ] **E2E Tests:** Validação da API simulando chamadas reais via Supertest.
+* [x] **Observabilidade:** Middleware para gerar e injetar **Correlation ID (X-Correlation-ID)** globalmente.
+* [x] **Webhook Security:** Handler para eventos do Stripe com validação de assinatura (HMAC) para confirmação de pagamento.
+* [x] **Unit Tests:** Cobertura 100% mockada dos serviços de Billing e Stripe.
 
 ### 🛡️ 3. Worker Consumer (Resiliência & Idempotência)
 * [ ] **SQS Consumer:** Implementação do listener assíncrono para processar a fila.
@@ -153,34 +151,37 @@ aws eks update-kubeconfig --region us-east-2 --name billing-engine-cluster
 
 ### 5. Configuração do Ambiente de Desenvolvimento (API Gateway)
 
-Após subir a infraestrutura com Terraform, precisamos conectar a API NestJS aos recursos reais criados na AWS. Utilizamos um script de automação que extrai os `outputs` do Terraform e as credenciais do seu `aws-cli` para gerar o arquivo `.env` automaticamente.
+Após subir a infraestrutura, precisamos conectar a API NestJS aos recursos reais.
 
 #### Gerando o arquivo .env
-Na raiz do projeto, execute o script de setup:
-
 ```bash
-# Dar permissão de execução
 chmod +x setup-env.sh
-
-# Rodar o script para mapear RDS, SQS e Credenciais AWS
 ./setup-env.sh
 ```
 
 #### 🔑 Configuração Manual de Segredos (Obrigatório)
-Por questões de segurança e integração externa, dois valores **precisam** ser inseridos manualmente no arquivo `./api-gateway/.env`:
+Edite o arquivo `./api-gateway/.env` e preencha as variáveis abaixo. **Atenção:** o Webhook Secret local é diferente do Webhook Secret de produção.
 
-1.  **DB_PASSWORD:** Insira a senha que você definiu na etapa de infraestrutura (a mesma usada na variável `TF_VAR_db_password`).
-2.  **STRIPE_SECRET_KEY:** Insira sua chave privada de teste obtida no [Dashboard do Stripe](https://dashboard.stripe.com/test/apikeys).
+1.  **DB_PASSWORD:** Senha definida na etapa de infraestrutura (`TF_VAR_db_password`).
+2.  **STRIPE_SECRET_KEY:** Sua chave privada de teste (`sk_test_...`) obtida no [Dashboard do Stripe](https://dashboard.stripe.com/test/apikeys).
+3.  **STRIPE_WEBHOOK_SECRET:** Necessário para validar a assinatura HMAC dos eventos enviados pelo Stripe.
 
 ```env
 # Exemplo de preenchimento manual no .env
 DB_PASSWORD=SuaSenhaSegura123
 STRIPE_SECRET_KEY=sk_test_51TIi...
+STRIPE_WEBHOOK_SECRET=whsec_... # Obtenha via Stripe CLI (ver próximo passo)
 ```
 
-### 🚀 6. Rodando a API Localmente
+#### 🔌 Validando Webhooks Localmente (Stripe CLI)
+Para que a API aceite as notificações de pagamento do Stripe no seu `localhost`, você deve usar o Stripe CLI como proxy:
 
-Com o `.env` configurado e o RDS (Ohio) pronto para conexões, inicie o servidor:
+1.  **Inicie o túnel:**
+    ```bash
+    stripe listen --forward-to localhost:3000/billing/webhook
+    ```
+2.  **Copie o Segredo:** O comando acima imprimirá seu `signing secret` (ex: `whsec_abc123...`). **Cole este valor no seu `.env`** na variável `STRIPE_WEBHOOK_SECRET`.
+3. Execute a api com os comandos abaixo:
 
 ```bash
 cd api-gateway
@@ -188,9 +189,17 @@ cd api-gateway
 # Instalar dependências
 npm install
 
+# Testes Automatizados
+npm run test
+
 # Iniciar o servidor de desenvolvimento
 npm run start:dev
 ```
+
+4.  **Simule um evento:** Em outro terminal, rode o comando abaixo para disparar um teste real:
+    ```bash
+    stripe trigger payment_intent.succeeded
+    ```
 
 #### 🧪 Testando o Fluxo de Faturamento (End-to-End)
 Para validar se a API está integrando corretamente com Stripe, Postgres e SQS, execute o seguinte comando no terminal:
@@ -220,4 +229,3 @@ antes de executar o comando esteja na raiz do projeto.
 ```bash
 aws sqs receive-message --queue-url $(grep AWS_SQS_QUEUE_URL api-gateway/.env | cut -d'=' -f2)
 ```
-

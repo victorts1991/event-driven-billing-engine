@@ -15,6 +15,8 @@ export class BillingService {
   ) {}
 
   async processIntent(data: { amount: number }, correlationId: string) {
+
+    console.log(`[BillingService] Iniciando checkout. CID: ${correlationId}`);
     
     const paymentIntent = await this.stripeService.createPaymentIntent(data.amount, correlationId);
 
