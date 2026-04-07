@@ -1,0 +1,23 @@
+{
+  "name": "billing-worker",
+  "version": "1.0.0",
+  "description": "Consumer para processamento de cobranças",
+  "main": "dist/index.js",
+  "scripts": {
+    "start": "node dist/index.js",
+    "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
+    "build": "tsc"
+  },
+  "dependencies": {
+    "@aws-sdk/client-sqs": "^3.500.0",
+    "dotenv": "^16.3.1",
+    "pg": "^8.11.3",
+    "redis": "^4.6.10"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.39",
+    "@types/pg": "^8.20.0",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.9.3"
+  }
+}

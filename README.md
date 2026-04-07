@@ -42,16 +42,20 @@ O foco principal é resolver o desafio da **consistência em sistemas distribuí
 * [x] **Unit Tests:** Cobertura 100% mockada dos serviços de Billing e Stripe.
 
 ### 🛡️ 3. Worker Consumer (Resiliência & Idempotência)
-* [ ] **SQS Consumer:** Implementação do listener assíncrono para processar a fila.
-* [ ] **Idempotência:** Estratégia de "Check-then-Act" usando Redis para evitar cobrança duplicada.
-* [ ] **Database Layer:** Persistência dos estados da transação (Pending, Succeeded, Failed).
-* [ ] **Retry Policy:** Configuração de visibilidade da fila e redrive para DLQ em caso de erro crítico.
+* [x] **SQS Consumer:** Implementação do listener assíncrono para processar a fila.
+* [x] **Idempotência:** Estratégia de "Check-then-Act" usando Redis para evitar cobrança duplicada.
+* [x] **Database Layer:** Persistência dos estados da transação (Pending, Succeeded, Failed).
+* [x] **Retry Policy:** Configuração de visibilidade da fila e redrive para DLQ em caso de erro crítico.
 
-### ☸️ 4. Orquestração Kubernetes (Manifestos & Helm)
-* [ ] **K8s Objects:** Escrita dos arquivos `deployment.yaml`, `service.yaml` e `hpa.yaml` para a API.
-* [ ] **Worker Scaling:** Configuração de Deployment específico para o Worker (sem Service, focado em consumo).
-* [ ] **ConfigMaps & Secrets:** Externalização de variáveis de ambiente e integração com Secrets do K8s.
-* [ ] **Liveness & Readiness:** Implementação de probes no NestJS para garantir que o tráfego só chegue quando o app estiver pronto.
+### ☸️ 4. Orquestração Kubernetes (Manifestos & Alta Disponibilidade)
+
+* [ ] **Multi-stage Dockerfiles:** Criação de builds otimizados para API (NestJS) e Worker (Node Puro), garantindo imagens leves e seguras para produção.
+* [ ] **K8s Objects (API):** Escrita dos arquivos `deployment.yaml`, `service.yaml` (LoadBalancer) e `hpa.yaml` para o gateway.
+* [ ] **Worker Deployment:** Configuração de Deployment específico para o Worker (sem Service), com foco exclusivo em consumo assíncrono.
+* [ ] **Graceful Shutdown & Lifecycle:** Implementação de sinais de sistema (`SIGTERM`) e `terminationGracePeriod` para garantir que nenhuma cobrança seja interrompida durante deploys ou escalas.
+* [ ] **ConfigMaps & Secrets:** Externalização de todas as variáveis de ambiente e integração segura com Secrets do Kubernetes.
+* [ ] **Liveness & Readiness:** Implementação de probes (NestJS e Worker) para garantir a auto-recuperação de Pods travados e tráfego apenas em instâncias prontas.
+* [ ] **Smarter Scaling (HPA):** Configuração de auto-scaling do Worker baseado no backlog da fila SQS (mensageria) em vez de apenas CPU/RAM.
 
 ### ⚙️ 5. Automação & CI/CD (The Grand Finale)
 * [ ] **Dockerization:** Dockerfile multi-stage otimizado para produção.
@@ -229,3 +233,84 @@ antes de executar o comando esteja na raiz do projeto.
 ```bash
 aws sqs receive-message --queue-url $(grep AWS_SQS_QUEUE_URL api-gateway/.env | cut -d'=' -f2)
 ```
+
+## 🏗️ Rodando o Worker (Fase 3: Consumo e Idempotência)
+
+O Worker é o motor assíncrono que garante a resiliência do faturamento. Ele utiliza **Idempotência Distribuída** com Redis para evitar cobranças duplicadas.
+
+### Configurando o Ambiente
+1. **Entre na pasta do worker:**
+   ```bash
+   cd billing-worker
+   ```
+2. **Sincronize o arquivo .env:**
+   ```bash
+   cp ../api-gateway/.env .env
+   ```
+   > **Nota:** Certifique-se de que a variável `REDIS_ENDPOINT` aponta para `localhost` para testes locais.
+
+3. **Suba o Redis Local (Docker):**
+   Como o ElastiCache da AWS é protegido por VPC, use um container local para gerenciar as travas de idempotência durante o desenvolvimento:
+   ```bash
+   docker run -d --name billing-redis -p 6379:6379 redis:alpine
+   ```
+
+4. **Instale e Inicie:**
+   ```bash
+   npm install
+   npm run dev
+   ```
+
+---
+
+## 🧪 Validando o Ciclo de Vida E2E
+
+Para garantir a confiabilidade da **Fase 3**, siga este roteiro de testes:
+
+### 1. O Teste de "Caminho Feliz"
+1. Com API e Worker rodando, dispare um checkout:
+   ```bash
+   curl -X POST http://localhost:3000/billing/checkout \
+        -H "Content-Type: application/json" \
+        -d '{"amount": 100}'
+   ```
+2. **O que observar:**
+   * **Console Worker:** Log `[CID] Transação finalizada com sucesso`.
+   * **Banco (RDS):** O status deve mudar de `PENDING` para `SUCCEEDED` (via SSL).
+   * **SQS:** A mensagem deve ser removida automaticamente da fila após o processamento.
+
+### 2. O Teste de Idempotência (Garantia de Resiliência)
+Este teste prova que o sistema não cobrará o cliente duas vezes em caso de retentativas do SQS ou do Provedor de pagamento.
+
+1. **Copie o `correlationId` e o `transactionId`** de um log de sucesso anterior.
+2. **Simule a duplicidade enviando a mensagem manualmente para o SQS:**
+   ```bash
+   # Substitua os valores abaixo pelos do seu teste anterior
+   aws sqs send-message \
+     --queue-url $(grep AWS_SQS_QUEUE_URL api-gateway/.env | cut -d'=' -f2) \
+     --message-body '{
+       "transactionId": "id-da-transacao-aqui",
+       "correlationId": "correlation-id-aqui",
+       "amount": 100
+     }'
+   ```
+3. **O que observar:**
+   * **Console do Worker:** Deve logar imediatamente: `[CORRELATION_ID] Mensagem duplicada ignorada.`.
+   * **Lógica:** O Worker "pesca" a mensagem, pergunta ao Redis se aquele `correlationId` já passou por ali e, como o Redis responde que sim, o Worker deleta a mensagem da fila sem tocar no Banco de Dados ou no Stripe.
+   * **Banco (RDS):** O campo `updatedAt` da transação **não** deve ser alterado.
+
+
+### 3. Consulta de Status via API
+Valide se a persistência foi integrada corretamente consultando o novo endpoint:
+```bash
+curl http://localhost:3000/billing/status/{transactionId_ou_correlationId}
+```
+**Resultado esperado:**
+```json
+{
+    "transactionId": "...",
+    "status": "SUCCEEDED",
+    "updatedAt": "2026-04-07T..."
+}
+```
+

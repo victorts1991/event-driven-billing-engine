@@ -1,0 +1,60 @@
+{
+  "info": {
+    "_postman_id": "a3873946-04dc-46ac-8f78-e666a30d49f3",
+    "name": "Billing Engine",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "4306986"
+  },
+  "item": [
+    {
+      "name": "billing/checkout",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n    \"amount\": 123\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "http://localhost:3000/billing/checkout",
+          "protocol": "http",
+          "host": [
+            "localhost"
+          ],
+          "port": "3000",
+          "path": [
+            "billing",
+            "checkout"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "billing/status",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "http://localhost:3000/billing/status/9dc09ee6-1068-40fd-a010-a58c80dc53b8",
+          "protocol": "http",
+          "host": [
+            "localhost"
+          ],
+          "port": "3000",
+          "path": [
+            "billing",
+            "status",
+            "9dc09ee6-1068-40fd-a010-a58c80dc53b8"
+          ]
+        }
+      },
+      "response": []
+    }
+  ]
+}

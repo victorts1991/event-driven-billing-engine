@@ -6,7 +6,10 @@ import {
   InternalServerErrorException, 
   Headers, 
   BadRequestException,
-  RawBodyRequest
+  RawBodyRequest,
+  Get,
+  Param,
+  NotFoundException
 } from '@nestjs/common';
 import { Request } from 'express';
 import { StripeService } from '../infra/payments/stripe.service';
@@ -37,6 +40,22 @@ export class BillingController {
       console.error('[BillingController] Erro:', error);
       throw new InternalServerErrorException(error);
     }
+  }
+
+  @Get('status/:id')
+  async getStatus(@Param('id') id: string) {
+    const transaction = await this.billingService.findTransaction(id);
+    
+    if (!transaction) {
+      throw new NotFoundException('Transação não encontrada');
+    }
+
+    return {
+      transactionId: transaction.id,
+      correlationId: transaction.correlationId,
+      status: transaction.status,
+      updatedAt: transaction.updatedAt,
+    };
   }
 
   @Post('webhook')

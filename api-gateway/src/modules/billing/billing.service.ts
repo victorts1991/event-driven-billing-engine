@@ -45,4 +45,13 @@ export class BillingService {
       correlationId 
     };
   }
+
+  async findTransaction(id: string): Promise<Transaction | null> {
+    return this.transactionRepo.findOne({
+      where: [
+        { id: id },
+        { correlationId: id } // Permite buscar por qualquer um dos dois IDs
+      ]
+    });
+  }
 }
