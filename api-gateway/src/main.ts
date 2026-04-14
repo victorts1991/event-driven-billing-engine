@@ -7,6 +7,9 @@ async function bootstrap() {
     rawBody: true, // ESSENCIAL para validar assinatura do Stripe
   });
   app.useGlobalPipes(new ValidationPipe());
+
+  app.enableShutdownHooks();
+  
   await app.listen(3000);
 }
 

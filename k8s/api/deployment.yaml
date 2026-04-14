@@ -1,0 +1,42 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: billing-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: billing-api
+  template:
+    metadata:
+      labels:
+        app: billing-api
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+      - name: api
+        image: $DOCKER_IMAGE_API 
+        ports:
+        - containerPort: 3000
+        envFrom:
+          - configMapRef:
+              name: billing-config
+          - secretRef:
+              name: billing-secrets
+        livenessProbe:
+          httpGet:
+            path: /health 
+            port: 3000
+          initialDelaySeconds: 15
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 3000
+          initialDelaySeconds: 10
+        resources:
+          requests:
+            cpu: "100m"  
+            memory: "128Mi"
+          limits:
+            cpu: "500m"  
+            memory: "512Mi"

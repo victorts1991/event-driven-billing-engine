@@ -7,7 +7,7 @@ terraform {
   }
 
   backend "s3" {
-    bucket = "stbilling-enginetf0abbc1"
+    bucket = "stbilling-enginetfc332be"
     key    = "billing-engine.tfstate"
     region = "us-east-2"
   }
@@ -31,6 +31,7 @@ module "messaging" {
   source   = "./modules/messaging"
   prefix   = var.prefix
   location = var.location
+  vpc_id   = data.aws_vpc.default.id
 }
 
 # --- 2. Database (RDS Postgres) ---
@@ -48,4 +49,10 @@ module "cluster" {
   prefix     = var.prefix
   vpc_id     = data.aws_vpc.default.id
   subnet_ids = data.aws_subnets.default.ids
+}
+
+# --- 4. Container Registry (ECR) ---
+module "registry" {
+  source = "./modules/registry"
+  prefix = var.prefix
 }

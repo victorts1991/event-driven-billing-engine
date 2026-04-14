@@ -1,0 +1,30 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: billing-worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: billing-worker
+  template:
+    metadata:
+      labels:
+        app: billing-worker
+    spec:
+      terminationGracePeriodSeconds: 60 # Worker aguarda até 15s para finalizar mensagem em curso + margem para fechar conexões
+      containers:
+      - name: worker
+        image: $DOCKER_IMAGE_WORKER 
+        envFrom:
+          - configMapRef:
+              name: billing-config
+          - secretRef:
+              name: billing-secrets
+        resources:
+          requests:
+            cpu: "100m" 
+            memory: "128Mi"
+          limits:
+            cpu: "500m"  
+            memory: "512Mi"

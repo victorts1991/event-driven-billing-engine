@@ -7,6 +7,7 @@ import { StripeService } from './modules/infra/payments/stripe.service';
 import { SqsService } from './modules/infra/sqs/sqs.service';
 import { CorrelationIdMiddleware } from './common/middleware/correlation-id.middleware';
 import { Transaction } from './modules/billing/entities/transaction.entity';
+import { AppController } from './app.controller';
 
 @Module({
   imports: [
@@ -30,7 +31,7 @@ import { Transaction } from './modules/billing/entities/transaction.entity';
     }),
     TypeOrmModule.forFeature([Transaction]),
   ],
-  controllers: [BillingController],
+  controllers: [AppController, BillingController],
   providers: [BillingService, StripeService, SqsService],
 })
 export class AppModule implements NestModule {

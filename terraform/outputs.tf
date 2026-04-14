@@ -26,3 +26,11 @@ output "cluster_name" {
 output "cluster_endpoint" {
   value = module.cluster.cluster_endpoint
 }
+
+output "ecr_api_url" {
+  value = module.registry.api_repository_url
+}
+
+output "ecr_worker_url" {
+  value = module.registry.worker_repository_url
+}

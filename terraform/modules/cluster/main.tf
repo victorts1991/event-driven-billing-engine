@@ -19,7 +19,7 @@ module "eks" {
       desired_size = 2
 
       instance_types = ["t3.medium"]
-      capacity_type  = "SPOT" # Economia pesada aqui
+      capacity_type  = "SPOT" 
 
       ami_type       = "AL2_x86_64"
 
