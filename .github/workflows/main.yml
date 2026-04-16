@@ -181,18 +181,17 @@ jobs:
           source aws.env
           export $(cat aws.env | xargs)
           
-          # TENTATIVA DE FIX: Se o de cima falhar, ignore a validação do server temporariamente
-          # ou use o comando com bypass de validação se for apenas erro de handshake
+          envsubst < k8s/configmap.yaml | kubectl apply -f -
+          envsubst < k8s/secrets.yaml | kubectl apply -f -
           
-          envsubst < k8s/configmap.yaml | kubectl apply --validate=false -f -
-          envsubst < k8s/secrets.yaml | kubectl apply --validate=false -f -
-          
-          envsubst < k8s/api/deployment.yaml | kubectl apply --validate=false -f -
+          envsubst < k8s/api/deployment.yaml | kubectl apply -f -
           kubectl apply -f k8s/api/svc.yaml
           kubectl apply -f k8s/api/hpa.yaml
           
-          envsubst < k8s/worker/deployment.yaml | kubectl apply --validate=false -f -
+          envsubst < k8s/worker/deployment.yaml | kubectl apply -f -
           kubectl apply -f k8s/worker/hpa.yaml
           
+          # Reinicia e AGUARDA ficar pronto
           kubectl rollout restart deployment billing-api
           kubectl rollout restart deployment billing-worker
+          kubectl rollout status deployment billing-api --timeout=150s
