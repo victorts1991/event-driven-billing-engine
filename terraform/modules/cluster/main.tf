@@ -25,7 +25,7 @@ module "eks" {
       instance_types = ["t3.medium"]
       capacity_type  = "SPOT" 
 
-      ami_type       = "AL2_x86_64"
+      ami_type       = "AL2023_x86_64"
 
       labels = {
         role = "worker"
