@@ -103,6 +103,7 @@ jobs:
   ci-qa-build:
     name: '4. CI: QA & Build'
     needs: [setup-env]
+    if: always() && needs.setup-env.result == 'success'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -144,6 +145,7 @@ jobs:
   cd-deploy:
     name: '5. CD: Deploy EKS'
     needs: [ci-qa-build]
+    if: always() && needs.ci-qa-build.result == 'success'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
