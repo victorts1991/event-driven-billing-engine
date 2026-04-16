@@ -1,0 +1,175 @@
+name: 'Full CI/CD: Event-Driven Billing'
+
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  changes:
+    name: '1. Detectar Alterações'
+    runs-on: ubuntu-latest
+    outputs:
+      infra_updated: ${{ steps.filter.outputs.terraform == 'true' || github.run_number == 1 }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v2
+        id: filter
+        with:
+          filters: |
+            terraform: ['terraform/**']
+            app: ['api-gateway/**', 'billing-worker/**', 'k8s/**']
+
+  terraform:
+    name: '2. Infraestrutura (Terraform)'
+    needs: [changes]
+    if: needs.changes.outputs.infra_updated == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-2
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform Apply
+        working-directory: ./terraform
+        run: |
+          terraform init
+          terraform apply -auto-approve \
+            -var="db_username=${{ secrets.DB_USERNAME }}" \
+            -var="db_password=${{ secrets.DB_PASSWORD }}"
+
+  setup-env:
+    name: '3. Auto-Discovery & Cloud Vars'
+    needs: [terraform]
+    if: always() && (needs.terraform.result == 'success' || needs.terraform.result == 'skipped')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-2
+
+      - name: Get Resources Data
+        id: get_data
+        run: |
+          API_URL=$(aws ecr describe-repositories --repository-names billing-api --query 'repositories[0].repositoryUri' --output text)
+          WORKER_URL=$(aws ecr describe-repositories --repository-names billing-worker --query 'repositories[0].repositoryUri' --output text)
+          SQS_URL=$(aws sqs get-queue-url --queue-name billing-queue --query 'QueueUrl' --output text)
+          DB_HOST=$(aws rds describe-db-instances --db-instance-identifier billing-db --query 'DBInstances[0].Endpoint.Address' --output text)
+          REDIS_HOST=$(aws elasticache describe-cache-clusters --cache-cluster-id billing-redis --show-cache-node-info --query 'CacheClusters[0].CacheNodes[0].Endpoint.Address' --output text)
+
+          {
+            echo "DOCKER_IMAGE_API=$API_URL:latest"
+            echo "DOCKER_IMAGE_WORKER=$WORKER_URL:latest"
+            echo "AWS_SQS_QUEUE_URL=$SQS_URL"
+            echo "DB_HOST=$DB_HOST"
+            echo "DB_DATABASE=billingdb"
+            echo "DB_USERNAME=${{ secrets.DB_USERNAME }}"
+            echo "AWS_REGION=us-east-2"
+            echo "REDIS_ENDPOINT=$REDIS_HOST"
+            echo "EKS_CLUSTER_NAME=billing-engine-cluster"
+          } > aws.env
+
+      - name: Upload das Variáveis
+        uses: actions/upload-artifact@v4
+        with:
+          name: aws-vars
+          path: aws.env
+          retention-days: 1
+
+  ci-qa-build:
+    name: '4. CI: QA & Build'
+    needs: [setup-env]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download Vars
+        uses: actions/download-artifact@v4
+        with: { name: aws-vars }
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: api-gateway/package-lock.json
+
+      - name: 🧪 Unit Tests (API Gateway)
+        working-directory: ./api-gateway
+        run: |
+          npm ci
+          npm test -- --passWithNoTests
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-2
+
+      - name: 📦 Build and Push to ECR
+        run: |
+          source aws.env
+          aws ecr get-login-password --region us-east-2 | docker login --username AWS --password-stdin $(echo $DOCKER_IMAGE_API | cut -d'/' -f1)
+          
+          docker build -t $DOCKER_IMAGE_API ./api-gateway
+          docker push $DOCKER_IMAGE_API
+          
+          docker build -t $DOCKER_IMAGE_WORKER ./billing-worker
+          docker push $DOCKER_IMAGE_WORKER
+
+  cd-deploy:
+    name: '5. CD: Deploy EKS'
+    needs: [ci-qa-build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download Vars
+        uses: actions/download-artifact@v4
+        with: { name: aws-vars }
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-2
+
+      - name: Update Kubeconfig
+        run: aws eks update-kubeconfig --name billing-engine-cluster --region us-east-2
+
+      - name: 🚀 Sync & Apply Manifests
+        env:
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+          STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        run: |
+          source aws.env
+          export $(cat aws.env | xargs)
+          
+          # Injeção dinâmica no ConfigMap e Secret
+          envsubst < k8s/configmap.yaml | kubectl apply -f -
+          envsubst < k8s/secrets.yaml | kubectl apply -f -
+          
+          # Deploy dos Workloads
+          envsubst < k8s/api/deployment.yaml | kubectl apply -f -
+          kubectl apply -f k8s/api/svc.yaml
+          kubectl apply -f k8s/api/hpa.yaml
+          
+          envsubst < k8s/worker/deployment.yaml | kubectl apply -f -
+          kubectl apply -f k8s/worker/hpa.yaml
+          
+          # Atualização dos pods para lerem os novos envs
+          kubectl rollout restart deployment billing-api
+          kubectl rollout restart deployment billing-worker
+          kubectl rollout status deployment billing-api --timeout=150s

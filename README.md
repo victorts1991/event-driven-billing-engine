@@ -62,10 +62,12 @@ O foco principal é resolver o desafio da **consistência em sistemas distribuí
 * [x] **HPA (API):** Auto-scaling baseado em CPU (60%) e Memória (80%), com mínimo de 1 e máximo de 2 réplicas.
 * [x] **HPA (Worker):** Auto-scaling baseado em CPU (70%), com mínimo de 1 e máximo de 2 réplicas.
 
-### ⚙️ 5. Automação & CI/CD
-* [ ] **CI Pipeline:** GitHub Actions para rodar testes e build da imagem.
-* [ ] **CD Pipeline:** Deploy automatizado no EKS (Helm ou K8s Manifests).
-* [ ] **Secret Management:** Injeção segura de credenciais via AWS Secrets Manager ou Terraform.
+### ⚙️ 5. Automação & CI/CD (GitOps & QA)
+* [ ] **CI Pipeline:** Workflow robusto no GitHub Actions com detecção inteligente de alterações (`paths-filter`) e execução de testes unitários (Jest) como gate de qualidade.
+* [ ] **Docker Strategy:** Pipeline de build multi-stage para API (NestJS) e Worker (Node.js), com armazenamento seguro no **Amazon ECR**.
+* [ ] **Auto-Discovery & IaC Integration:** Implementação de estágio de descoberta dinâmica via AWS CLI, capturando endpoints de RDS, ElastiCache e SQS para evitar *hardcoding*.
+* [ ] **CD Pipeline (Manifest-driven):** Deploy automatizado no EKS utilizando `envsubst` para injeção dinâmica de variáveis em manifestos nativos do Kubernetes.
+* [ ] **Secret Management:** Estratégia de sincronização de segredos entre GitHub Secrets e K8s Secrets, resolvendo o "Dilema do Webhook" do Stripe via re-feeds automatizados e `rollout restart`.
 
 ---
 
@@ -179,7 +181,7 @@ E depois, execute o script pela primeira vez:
 
 ```bash
 chmod +x setup-k8s-env.sh
-source ./setup-k8s-env.sh
+./setup-k8s-env.sh
 ```
 
 > **🔑 O script solicitará no terminal:** `DB_PASSWORD`, `STRIPE_SECRET_KEY` e `STRIPE_WEBHOOK_SECRET`.
@@ -191,6 +193,8 @@ source ./setup-k8s-env.sh
 ### 1. Autenticação no Amazon ECR
 As URLs dos repositórios já são geradas pelo Terraform. Para autenticar o Docker:
 ```bash
+# O script setup-k8s-env.sh já exporta as variáveis necessárias
+source ./setup-k8s-env.sh
 
 aws ecr get-login-password --region us-east-2 | docker login --username AWS --password-stdin $(echo $ECR_API_URL | cut -d'/' -f1)
 ```
@@ -321,3 +325,73 @@ A primeira mensagem é processada normalmente. A segunda, com os mesmos IDs, é 
 ```bash
 kubectl get hpa
 ```
+
+---
+
+### 🚀 Guia de Execução e CI/CD
+
+O deploy deste ecossistema é totalmente automatizado, mas segue um fluxo lógico para garantir que a infraestrutura e os segredos de negócio estejam sincronizados.
+
+#### 1. Bootstrap da Infraestrutura (Máquina Local)
+Antes do primeiro push, você precisa preparar o terreno na AWS para que o GitHub Actions tenha onde guardar o estado do Terraform e permissão para criar recursos:
+
+1. Execute o script de bootstrap:
+   ```bash
+   chmod +x bootstrap.sh
+   ./bootstrap.sh
+   ```
+2. O script criará um **Bucket S3** (para o Terraform State) e um **Usuário IAM** com permissões administrativas.
+3. **Importante:** Copie o nome do bucket gerado e cole no arquivo `terraform/main.tf`, dentro do bloco:
+   ```hcl
+   backend "s3" {
+      bucket = "NOME_DO_BUCKET_GERADO_AQUI"
+      key    = "billing-engine.tfstate"
+      region = "us-east-2"
+   }
+   ```
+
+#### 2. Configuração de Secrets no GitHub
+Acesse seu repositório em **Settings > Secrets and Variables > Actions** e cadastre as seguintes variáveis:
+
+| Variável | Origem | Descrição |
+| :--- | :--- | :--- |
+| `AWS_ACCESS_KEY_ID` | `bootstrap.sh` | ID da chave de acesso do usuário IAM criado. |
+| `AWS_SECRET_ACCESS_KEY` | `bootstrap.sh` | Chave secreta do usuário IAM criado. |
+| `AWS_REGION` | `bootstrap.sh` | Região definida no bootstrap (Padrão: `us-east-2`). |
+| `DB_USERNAME` | **Você define** | Usuário administrativo do RDS Postgres (ex: `admin_victor`). |
+| `DB_PASSWORD` | **Você define** | Senha forte para o banco de dados. |
+| `STRIPE_SECRET_KEY` | [Stripe Dashboard](https://dashboard.stripe.com/test/apikeys) | Sua Secret Key de teste (`sk_test_...`). |
+| `STRIPE_WEBHOOK_SECRET` | [Stripe Webhooks](https://dashboard.stripe.com/test/webhooks) | **Deixe vazio no 1º deploy.** (Veja "O Dilema do Webhook"). |
+
+#### 3. O Fluxo de Deploy Automatizado
+Após configurar os Secrets, o fluxo segue esta ordem:
+
+* **Git Push:** O pipeline detecta alterações e inicia o Job de Terraform.
+* **Provisionamento:** O RDS, ElastiCache, SQS e o Cluster EKS são criados.
+* **Auto-Discovery:** O pipeline consulta a AWS via CLI para descobrir os novos Endpoints (DB Host, Redis Host, SQS URL) e gera o `ConfigMap` dinamicamente.
+* **QA & Build:** Os testes unitários do NestJS são executados. Se passarem, as imagens Docker são enviadas ao ECR.
+* **K8s Deploy:** O pipeline injeta os segredos e variáveis nos manifestos YAML e aplica no cluster.
+
+---
+
+### 🛡️ O Dilema do Webhook 
+
+Em sistemas de faturamento distribuídos, enfrentamos um problema de precedência: o Stripe exige uma URL de destino para enviar os eventos de pagamento, mas essa URL só é gerada pelo LoadBalancer da AWS **depois** que a aplicação já foi deployada no Kubernetes.
+
+**Para resolver isso são duas etapas:**
+
+1.  **Deploy Inicial:** O pipeline sobe a aplicação com o segredo `STRIPE_WEBHOOK_SECRET` vazio. A API ficará online e o AWS LoadBalancer atribuirá um `EXTERNAL-IP`.
+2.  **Fechamento do Ciclo:** * Pegue o IP gerado com `kubectl get svc billing-api-service`.
+    * Cadastre a URL `http://<IP_DO_LB>/billing/webhook` no painel do Stripe.
+    * Pegue o **Signing Secret** (`whsec_...`) e salve-o no GitHub Secrets como `STRIPE_WEBHOOK_SECRET`.
+    * Rode o pipeline novamente (ou dê um re-run). Agora, o pipeline injetará o segredo real e reiniciará os Pods via `rollout restart`, ativando a segurança HMAC nas transações.
+
+---
+
+### ⚙️ Arquitetura do Pipeline CI/CD
+
+O arquivo `.github/workflows/main.yml` implementa uma esteira de **GitOps** com as seguintes camadas:
+* **Idempotência:** O Terraform garante que a infra não seja duplicada.
+* **QA Gate:** O build é interrompido se os testes unitários falharem.
+* **Injeção Dinâmica:** Usei o `envsubst` para preencher os arquivos `k8s/secrets.yaml` e `k8s/configmap.yaml` em tempo de execução, garantindo que nenhum dado sensível ou endpoint mutável fique "hardcoded" no repositório.
+* **Zero Downtime:** O deploy no EKS utiliza estratégias de Rolling Update para garantir que o motor de cobrança nunca pare de processar mensagens durante uma atualização.
