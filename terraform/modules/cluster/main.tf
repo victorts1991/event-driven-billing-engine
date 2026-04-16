@@ -11,8 +11,9 @@ module "eks" {
 
   cluster_endpoint_public_access = true
 
-  # --- CONFIGURAÇÃO DE ACESSO ---
   enable_cluster_creator_admin_permissions = true
+  
+  include_oidc_root_ca_thumbprint = true
 
   # --- WORKER NODES (Managed Node Groups) ---
   eks_managed_node_groups = {
