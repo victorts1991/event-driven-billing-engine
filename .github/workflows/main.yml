@@ -195,3 +195,17 @@ jobs:
           kubectl rollout restart deployment billing-api
           kubectl rollout restart deployment billing-worker
           kubectl rollout status deployment billing-api --timeout=150s
+
+      - name: Recupera o link da api
+        run: |
+          echo "Aguardando LoadBalancer..."
+          sleep 60
+          # Pega o DNS do LoadBalancer e salva num arquivo
+          kubectl get svc billing-api-service -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' > api_url.txt
+          echo "Endpoint salvo no artefato."
+
+      - name: 📤 Disponibilizar URL
+        uses: actions/upload-artifact@v4
+        with:
+          name: link-da-api
+          path: api_url.txt
