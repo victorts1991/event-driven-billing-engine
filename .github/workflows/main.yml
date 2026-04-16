@@ -195,3 +195,16 @@ jobs:
           kubectl rollout restart deployment billing-api
           kubectl rollout restart deployment billing-worker
           kubectl rollout status deployment billing-api --timeout=150s
+
+      - name: Wait for LoadBalancer & Output Endpoint
+        run: |
+          echo "Aguardando o provisionamento do LoadBalancer (60s)..."
+          sleep 60
+          
+          echo "===================================================="
+          echo "DEPLOY FINALIZADO!"
+          echo "ENDPOINT PÚBLICO DA API:"
+          # Pega o hostname do LoadBalancer
+          LB_HOSTNAME=$(kubectl get svc billing-api-service -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+          echo "http://$LB_HOSTNAME"
+          echo "===================================================="
