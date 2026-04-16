@@ -17,7 +17,8 @@ provider "aws" {
   region = var.location
 }
 
-data "aws_sts_get_caller_identity" "current" {}
+# --- Identidade ---
+data "aws_caller_identity" "current" {}
 
 # --- 0. Network (VPC Default da AWS para simplificar como no Azure) ---
 data "aws_vpc" "default" { default = true }
@@ -52,8 +53,8 @@ module "cluster" {
   vpc_id     = data.aws_vpc.default.id
   subnet_ids = data.aws_subnets.default.ids
 
-  admin_principal_arn = data.aws_sts_get_caller_identity.current.arn
-  
+  admin_principal_arn = data.aws_caller_identity.current.arn
+
 }
 
 # --- 4. Container Registry (ECR) ---
