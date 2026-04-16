@@ -1,7 +1,3 @@
-# --- Identidade ---
-# Captura o ARN do usuário/role que está executando o Terraform
-data "aws_sts_get_caller_identity" "current" {}
-
 # --- Cluster EKS ---
 module "eks" {
   source  = "terraform-aws-modules/eks/aws"
@@ -23,7 +19,7 @@ module "eks" {
   # 2. Mapeia explicitamente o usuário atual do IAM para o RBAC do Kubernetes como Administrator
   access_entries = {
     admin_user = {
-      principal_arn = data.aws_sts_get_caller_identity.current.arn
+      principal_arn = var.admin_principal_arn
       policy_associations = {
         admin = {
           policy_arn = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
