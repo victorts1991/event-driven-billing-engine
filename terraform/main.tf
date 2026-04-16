@@ -53,8 +53,6 @@ module "cluster" {
   vpc_id     = data.aws_vpc.default.id
   subnet_ids = data.aws_subnets.default.ids
 
-  admin_principal_arn = data.aws_caller_identity.current.arn
-
 }
 
 # --- 4. Container Registry (ECR) ---

@@ -9,8 +9,3 @@ variable "vpc_id" {
 variable "subnet_ids" {
   type = list(string)
 }
-
-variable "admin_principal_arn" {
-  description = "ARN do usuário admin capturado na raiz"
-  type        = string
-}
