@@ -63,11 +63,11 @@ O foco principal é resolver o desafio da **consistência em sistemas distribuí
 * [x] **HPA (Worker):** Auto-scaling baseado em CPU (70%), com mínimo de 1 e máximo de 2 réplicas.
 
 ### ⚙️ 5. Automação & CI/CD (GitOps & QA)
-* [ ] **CI Pipeline:** Workflow robusto no GitHub Actions com detecção inteligente de alterações (`paths-filter`) e execução de testes unitários (Jest) como gate de qualidade.
-* [ ] **Docker Strategy:** Pipeline de build multi-stage para API (NestJS) e Worker (Node.js), com armazenamento seguro no **Amazon ECR**.
-* [ ] **Auto-Discovery & IaC Integration:** Implementação de estágio de descoberta dinâmica via AWS CLI, capturando endpoints de RDS, ElastiCache e SQS para evitar *hardcoding*.
-* [ ] **CD Pipeline (Manifest-driven):** Deploy automatizado no EKS utilizando `envsubst` para injeção dinâmica de variáveis em manifestos nativos do Kubernetes.
-* [ ] **Secret Management:** Estratégia de sincronização de segredos entre GitHub Secrets e K8s Secrets, resolvendo o "Dilema do Webhook" do Stripe via re-feeds automatizados e `rollout restart`.
+* [x] **CI Pipeline:** Workflow robusto no GitHub Actions com detecção inteligente de alterações (`paths-filter`) e execução de testes unitários (Jest) como gate de qualidade.
+* [x] **Docker Strategy:** Pipeline de build multi-stage para API (NestJS) e Worker (Node.js), com armazenamento seguro no **Amazon ECR**.
+* [x] **Auto-Discovery & IaC Integration:** Implementação de estágio de descoberta dinâmica via AWS CLI, capturando endpoints de RDS, ElastiCache e SQS para evitar *hardcoding*.
+* [x] **CD Pipeline (Manifest-driven):** Deploy automatizado no EKS utilizando `envsubst` para injeção dinâmica de variáveis em manifestos nativos do Kubernetes.
+* [x] **Secret Management:** Estratégia de sincronização de segredos entre GitHub Secrets e K8s Secrets, resolvendo o "Dilema do Webhook" do Stripe via re-feeds automatizados e `rollout restart`.
 
 ---
 
@@ -139,7 +139,7 @@ terraform apply -auto-approve
 
 ### 4. Configuração do Contexto Kubernetes
 ```bash
-aws eks update-kubeconfig --region us-east-2 --name billing-engine-cluster
+aws eks update-kubeconfig --region us-east-2 --name billing-engine-v2-cluster
 ```
 
 ### 5. Configuração do Ambiente Kubernetes
@@ -168,10 +168,10 @@ Com isso em mente, primeiro faça a configuração de Acesso ao Cluster (RBAC/EK
 ```bash
 USER_ARN=$(aws sts get-caller-identity --query Arn --output text)
 
-aws eks create-access-entry --cluster-name billing-engine-cluster \
+aws eks create-access-entry --cluster-name billing-engine-v2-cluster \
     --principal-arn $USER_ARN --type STANDARD
 
-aws eks associate-access-policy --cluster-name billing-engine-cluster \
+aws eks associate-access-policy --cluster-name billing-engine-v2-cluster \
     --principal-arn $USER_ARN \
     --policy-arn arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy \
     --access-scope type=cluster
@@ -341,14 +341,7 @@ Antes do primeiro push, você precisa preparar o terreno na AWS para que o GitHu
    ./bootstrap.sh
    ```
 2. O script criará um **Bucket S3** (para o Terraform State) e um **Usuário IAM** com permissões administrativas.
-3. **Importante:** Copie o nome do bucket gerado e cole no arquivo `terraform/main.tf`, dentro do bloco:
-   ```hcl
-   backend "s3" {
-      bucket = "NOME_DO_BUCKET_GERADO_AQUI"
-      key    = "billing-engine.tfstate"
-      region = "us-east-2"
-   }
-   ```
+3. **Importante:** Copie o nome do bucket gerado e cole no arquivo `terraform/main.tf`, dentro do bloco `backend "s3"`.
 
 #### 2. Configuração de Secrets no GitHub
 Acesse seu repositório em **Settings > Secrets and Variables > Actions** e cadastre as seguintes variáveis:
@@ -358,7 +351,7 @@ Acesse seu repositório em **Settings > Secrets and Variables > Actions** e cada
 | `AWS_ACCESS_KEY_ID` | `bootstrap.sh` | ID da chave de acesso do usuário IAM criado. |
 | `AWS_SECRET_ACCESS_KEY` | `bootstrap.sh` | Chave secreta do usuário IAM criado. |
 | `AWS_REGION` | `bootstrap.sh` | Região definida no bootstrap (Padrão: `us-east-2`). |
-| `DB_USERNAME` | **Você define** | Usuário administrativo do RDS Postgres (ex: `admin_victor`). |
+| `DB_USERNAME` | **Você define** | Usuário administrativo do RDS Postgres. |
 | `DB_PASSWORD` | **Você define** | Senha forte para o banco de dados. |
 | `STRIPE_SECRET_KEY` | [Stripe Dashboard](https://dashboard.stripe.com/test/apikeys) | Sua Secret Key de teste (`sk_test_...`). |
 | `STRIPE_WEBHOOK_SECRET` | [Stripe Webhooks](https://dashboard.stripe.com/test/webhooks) | **Deixe vazio no 1º deploy.** (Veja "O Dilema do Webhook"). |
@@ -367,31 +360,45 @@ Acesse seu repositório em **Settings > Secrets and Variables > Actions** e cada
 Após configurar os Secrets, o fluxo segue esta ordem:
 
 * **Git Push:** O pipeline detecta alterações e inicia o Job de Terraform.
-* **Provisionamento:** O RDS, ElastiCache, SQS e o Cluster EKS são criados.
-* **Auto-Discovery:** O pipeline consulta a AWS via CLI para descobrir os novos Endpoints (DB Host, Redis Host, SQS URL) e gera o `ConfigMap` dinamicamente.
-* **QA & Build:** Os testes unitários do NestJS são executados. Se passarem, as imagens Docker são enviadas ao ECR.
-* **K8s Deploy:** O pipeline injeta os segredos e variáveis nos manifestos YAML e aplica no cluster.
+* **Provisionamento:** O RDS, ElastiCache, SQS e o **Cluster EKS (v1.33)** são criados.
+* **Auto-Discovery:** O pipeline consulta a AWS para descobrir os novos Endpoints e gera o `ConfigMap` dinamicamente.
+* **QA & Build:** Testes unitários do NestJS são executados e imagens Docker enviadas ao ECR.
+* **K8s Deploy:** O pipeline aplica os manifestos no cluster via `envsubst`.
 
 ---
 
-### 🛡️ O Dilema do Webhook 
+### 🛡️ O Dilema do Webhook (Resolvido com Artefatos)
 
-Em sistemas de faturamento distribuídos, enfrentamos um problema de precedência: o Stripe exige uma URL de destino para enviar os eventos de pagamento, mas essa URL só é gerada pelo LoadBalancer da AWS **depois** que a aplicação já foi deployada no Kubernetes.
+Em sistemas de faturamento, o Stripe exige uma URL de destino, mas essa URL (LoadBalancer) só nasce após o deploy. Como o GitHub Actions mascara URLs de Cloud nos logs (`***`), usamos **Artefatos de Pipeline** para obter o endereço real.
 
-**Para resolver isso são duas etapas:**
+**Para fechar o ciclo:**
 
-1.  **Deploy Inicial:** O pipeline sobe a aplicação com o segredo `STRIPE_WEBHOOK_SECRET` vazio. A API ficará online e o AWS LoadBalancer atribuirá um `EXTERNAL-IP`.
-2.  **Fechamento do Ciclo:** * Pegue o IP gerado com `kubectl get svc billing-api-service`.
-    * Cadastre a URL `http://<IP_DO_LB>/billing/webhook` no painel do Stripe.
-    * Pegue o **Signing Secret** (`whsec_...`) e salve-o no GitHub Secrets como `STRIPE_WEBHOOK_SECRET`.
-    * Rode o pipeline novamente (ou dê um re-run). Agora, o pipeline injetará o segredo real e reiniciará os Pods via `rollout restart`, ativando a segurança HMAC nas transações.
+1.  **Primeiro Deploy:** Execute o pipeline com `STRIPE_WEBHOOK_SECRET` vazio.
+2.  **Captura da URL:** * No GitHub, clique na aba **Actions** e selecione a última execução.
+    * No topo ou final da página, procure pela seção **Artifacts**.
+    * Baixe o arquivo `link-da-api-stripe` (ou nome similar definido no workflow).
+    * Abra o arquivo `.txt` contido no zip para copiar o endereço do LoadBalancer sem máscaras.
+3.  **Configuração:** Cadastre a URL `http://<DNS_DO_LB>/billing/webhook` no Stripe.
+4.  **Ativação:** Pegue o **Signing Secret** (`whsec_...`), salve no GitHub Secrets e rode o pipeline novamente para ativar a segurança HMAC.
+
+---
+
+### 🧪 Validando a API (EKS)
+
+Para testar o ecossistema em produção, utilize o mesmo procedimento descrito na documentação de desenvolvimento (scripts de teste ou Insomnia/Postman), substituindo o `localhost` pelo **Hostname do LoadBalancer** obtido via artefato.
+
+**Exemplo via cURL:**
+```bash
+# O EXTERNAL_ID é o hostname extraído do arquivo de artefato
+curl http://<EXTERNAL_ID>/health
+```
 
 ---
 
 ### ⚙️ Arquitetura do Pipeline CI/CD
 
-O arquivo `.github/workflows/main.yml` implementa uma esteira de **GitOps** com as seguintes camadas:
-* **Idempotência:** O Terraform garante que a infra não seja duplicada.
-* **QA Gate:** O build é interrompido se os testes unitários falharem.
-* **Injeção Dinâmica:** Usei o `envsubst` para preencher os arquivos `k8s/secrets.yaml` e `k8s/configmap.yaml` em tempo de execução, garantindo que nenhum dado sensível ou endpoint mutável fique "hardcoded" no repositório.
-* **Zero Downtime:** O deploy no EKS utiliza estratégias de Rolling Update para garantir que o motor de cobrança nunca pare de processar mensagens durante uma atualização.
+O arquivo `.github/workflows/main.yml` implementa uma esteira de **GitOps**:
+* **Versão Moderna:** Cluster rodando Kubernetes **1.33** com **Amazon Linux 2023 (AL2023)**.
+* **Idempotência:** O Terraform garante a integridade da infraestrutura.
+* **Injeção Dinâmica:** Uso de `envsubst` para preencher `k8s/secrets.yaml` e `k8s/configmap.yaml` em runtime.
+* **Zero Downtime:** Deploy com estratégias de *Rolling Update* para processamento contínuo de mensagens.
