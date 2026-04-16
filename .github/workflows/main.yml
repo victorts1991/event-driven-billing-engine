@@ -94,7 +94,7 @@ jobs:
             echo "DB_USERNAME=${{ secrets.DB_USERNAME }}"
             echo "AWS_REGION=us-east-2"
             echo "REDIS_ENDPOINT=${{ env.REDIS_HOST }}"
-            echo "EKS_CLUSTER_NAME=billing-engine-cluster"
+            echo "EKS_CLUSTER_NAME=billing-engine-v2-cluster"
           } > aws.env
 
       - name: Upload das Variáveis
@@ -167,7 +167,7 @@ jobs:
       - name: Update Kubeconfig
         run: |
           # Força a atualização do kubeconfig
-          aws eks update-kubeconfig --name billing-engine-cluster --region us-east-2
+          aws eks update-kubeconfig --name billing-engine-v2-cluster --region us-east-2
           
           # Tenta validar a identidade que o CLI está usando
           aws sts get-caller-identity
