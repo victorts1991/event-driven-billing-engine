@@ -47,9 +47,13 @@ jobs:
   setup-env:
     name: '3. Auto-Discovery & Cloud Vars'
     needs: [terraform]
-    if: always() && (needs.terraform.result == 'success' || needs.terraform.result == 'skipped')
+    # Executa se o terraform passou ou se foi pulado (infra já existe)
+    if: always() && !contains(needs.terraform.result, 'failure')
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -57,27 +61,35 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-2
           
-      - name: 'Wait for Services Ready'
+      - name: 'Wait for AWS Propagation'
         run: sleep 40
 
-      - name: Get Resources Data
-        id: get_data
-        run: |
-          API_URL=$(aws ecr describe-repositories --repository-names billing-api --query 'repositories[0].repositoryUri' --output text)
-          WORKER_URL=$(aws ecr describe-repositories --repository-names billing-worker --query 'repositories[0].repositoryUri' --output text)
-          SQS_URL=$(aws sqs get-queue-url --queue-name billing-queue --query 'QueueUrl' --output text)
-          DB_HOST=$(aws rds describe-db-instances --db-instance-identifier billing-db --query 'DBInstances[0].Endpoint.Address' --output text)
-          REDIS_HOST=$(aws elasticache describe-cache-clusters --cache-cluster-id billing-redis --show-cache-node-info --query 'CacheClusters[0].CacheNodes[0].Endpoint.Address' --output text)
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
 
+      - name: Get Terraform Outputs
+        id: tf_outputs
+        working-directory: ./terraform
+        run: |
+          terraform init
+          # Captura os valores reais do State do Terraform (S3)
+          echo "ECR_API_URL=$(terraform output -raw ecr_api_url)" >> $GITHUB_ENV
+          echo "ECR_WORKER_URL=$(terraform output -raw ecr_worker_url)" >> $GITHUB_ENV
+          echo "SQS_URL=$(terraform output -raw sqs_url)" >> $GITHUB_ENV
+          echo "DB_HOST=$(terraform output -raw db_endpoint)" >> $GITHUB_ENV
+          echo "REDIS_HOST=$(terraform output -raw redis_endpoint)" >> $GITHUB_ENV
+
+      - name: Generate aws.env
+        run: |
           {
-            echo "DOCKER_IMAGE_API=$API_URL:latest"
-            echo "DOCKER_IMAGE_WORKER=$WORKER_URL:latest"
-            echo "AWS_SQS_QUEUE_URL=$SQS_URL"
-            echo "DB_HOST=$DB_HOST"
+            echo "DOCKER_IMAGE_API=${{ env.ECR_API_URL }}:latest"
+            echo "DOCKER_IMAGE_WORKER=${{ env.ECR_WORKER_URL }}:latest"
+            echo "AWS_SQS_QUEUE_URL=${{ env.SQS_URL }}"
+            echo "DB_HOST=${{ env.DB_HOST }}"
             echo "DB_DATABASE=billingdb"
             echo "DB_USERNAME=${{ secrets.DB_USERNAME }}"
             echo "AWS_REGION=us-east-2"
-            echo "REDIS_ENDPOINT=$REDIS_HOST"
+            echo "REDIS_ENDPOINT=${{ env.REDIS_HOST }}"
             echo "EKS_CLUSTER_NAME=billing-engine-cluster"
           } > aws.env
 
