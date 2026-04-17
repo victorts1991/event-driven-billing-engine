@@ -1,6 +1,5 @@
 # Event-Driven Billing Engine 💳
 
-![Status: Em Desenvolvimento](https://img.shields.io/badge/Status-Em_Desenvolvimento-yellow?style=for-the-badge&logo=github)
 ![Node.js](https://img.shields.io/badge/Node.js-20+-339933?style=for-the-badge&logo=nodedotjs)
 ![NestJS](https://img.shields.io/badge/NestJS-E0234E?style=for-the-badge&logo=nestjs)
 ![AWS SQS](https://img.shields.io/badge/Messaging-AWS_SQS-FF9900?style=for-the-badge&logo=amazonsqs)
