@@ -401,3 +401,4 @@ O arquivo `.github/workflows/main.yml` implementa uma esteira de **GitOps**:
 * **Idempotência:** O Terraform garante a integridade da infraestrutura.
 * **Injeção Dinâmica:** Uso de `envsubst` para preencher `k8s/secrets.yaml` e `k8s/configmap.yaml` em runtime.
 * **Zero Downtime:** Deploy com estratégias de *Rolling Update* para processamento contínuo de mensagens.
+
