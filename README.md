@@ -15,6 +15,13 @@ Ecossistema de microserviços de alta escalabilidade para processamento de fatur
 ## 🚀 Objetivo
 O foco principal é resolver o desafio da **consistência em sistemas distribuídos**. O motor de cobrança garante que, mesmo sob falhas de rede ou instabilidade do provedor de pagamento, o estado final do faturamento seja reconciliado sem duplicidade, utilizando **Correlation IDs** e arquitetura orientada a eventos.
 
+
+## 📺 Demonstração em Vídeo
+
+[![Demonstração do Sistema](https://img.youtube.com/vi/nE4x33QzcYU/0.jpg)](https://www.youtube.com/watch?v=nE4x33QzcYU)
+
+*Clique na imagem acima para assistir à demonstração completa do fluxo (Infra, API e CI/CD).*
+
 ## 🛠️ Stack Tecnológica
 * **Linguagens:** TypeScript (Node.js 20+)
 * **Frameworks:** NestJS (API Gateway) & Node.js Puro (Worker Consumer)
