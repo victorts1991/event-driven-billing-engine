@@ -42,7 +42,7 @@ O foco principal é resolver o desafio da **consistência em sistemas distribuí
 * [x] **Bootstrap:** S3 para Remote State + Usuário IAM com chaves.
 * [x] **Mensageria:** Módulo SQS (Standard + DLQ) configurado em *us-east-2*.
 * [x] **Database & Cache:** RDS Postgres (v15) + ElastiCache Redis (v7).
-* [x] **EKS:** Cluster Kubernetes v1.29 com Managed Node Groups (SPOT + AL2).
+* [x] **EKS:** Cluster Kubernetes v1.33.
 
 ### 🚀 2. API Gateway & Mensageria
 * [x] **Project Setup:** Scaffold do NestJS com ConfigService e validação rigorosa de `.env`.
